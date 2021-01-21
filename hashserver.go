@@ -7,6 +7,7 @@ import (
     "net/http"
     "os"
     "strconv"
+    "strings"
     "sync/atomic"
     "time"
 )
@@ -26,13 +27,19 @@ func (v *Int64) Add(i int64) int64 {
 
 var hashCounter Int64 = *NewInt64(0)
 var hashTime Int64 = *NewInt64(0)
-var hashMap = make(map[int64]string)
+var hashMap = make(map[string]string)
 var serverPort = "8080"
 var sleepSeconds = time.Duration(5)
 
 
 func hashGET(w http.ResponseWriter, req *http.Request) {
-    fmt.Fprintf(w, "hashGET\n")
+    key := strings.TrimPrefix(req.URL.Path, "/hash/")
+    val, ok := hashMap[key]
+    if ok {
+        fmt.Fprintf(w, "%s\n", val)
+    } else {
+        fmt.Fprintf(w, "Missing index %s\n", key)
+    }
 }
 
 
@@ -54,7 +61,7 @@ func saveHashValue(key int64, value string) {
     sha_512 := sha512.New()
     sha_512.Write([]byte(value))
     hashVal := base64.StdEncoding.EncodeToString(sha_512.Sum(nil))
-    hashMap[key] = hashVal
+    hashMap[strconv.FormatInt(key, 10)] = hashVal
 }
 
 
@@ -98,7 +105,7 @@ func processArgs() {
     argName := ""
     for i := 1; i < len(os.Args); i++ {
         if argName == "-port" {
-            portVal, portErr := strconv.ParseInt(os.Args[i], 0, 0)
+            portVal, portErr := strconv.ParseInt(os.Args[i], 10, 64)
             if portErr == nil {
                 if portVal > 1 {
                     serverPort = os.Args[i]
@@ -106,7 +113,7 @@ func processArgs() {
             }
         }
         if argName == "-sleep" {
-            sleepVal, sleepErr := strconv.ParseInt(os.Args[i], 0, 0)
+            sleepVal, sleepErr := strconv.ParseInt(os.Args[i], 10, 64)
             if sleepErr == nil {
                 if sleepVal > 0 {
                     sleepSeconds = time.Duration(sleepVal)
@@ -122,6 +129,7 @@ func main() {
     processArgs()
 
     http.HandleFunc("/hash", hashHandler)
+    http.HandleFunc("/hash/", hashGET)
     http.HandleFunc("/stats", statsHandler)
     http.ListenAndServe(":" + serverPort, nil)
 }
