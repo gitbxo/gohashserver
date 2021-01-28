@@ -3,9 +3,9 @@ package main
 import (
     "crypto/sha512"
     "encoding/base64"
+    "flag"
     "fmt"
     "net/http"
-    "os"
     "strconv"
     "strings"
     "sync/atomic"
@@ -25,11 +25,18 @@ func (v *Int64) Add(i int64) int64 {
     return atomic.AddInt64(&v.c, i)
 }
 
-var hashCounter Int64 = *NewInt64(0)
-var hashTime Int64 = *NewInt64(0)
-var hashMap = make(map[string]string)
-var serverPort = "8080"
-var sleepSeconds = time.Duration(5)
+
+var (
+    hashCounter Int64   = *NewInt64(0)
+    hashTime Int64      = *NewInt64(0)
+    hashMap             = make(map[string]string)
+
+    serverPort          = flag.Int("port", 8080, "http port to listen on")
+    hashDelaySeconds    = flag.Duration("hash-delay", 5,
+            "Delay for hash computation (5s,5m,5h)")
+    shutdownDelay       = flag.Duration("shutdown-delay", 10 * time.Second,
+            "Delay before shutdown to allow work to complete")
+)
 
 
 func hashGET(w http.ResponseWriter, req *http.Request) {
@@ -57,7 +64,7 @@ func hashPOST(w http.ResponseWriter, start time.Time, password string) {
 
 func saveHashValue(key int64, value string) {
     // sleep 5 seconds
-    time.Sleep(sleepSeconds * time.Second)
+    time.Sleep( hashDelaySeconds * time.Second )
     sha_512 := sha512.New()
     sha_512.Write([]byte(value))
     hashVal := base64.StdEncoding.EncodeToString(sha_512.Sum(nil))
@@ -101,35 +108,11 @@ func hashHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 
-func processArgs() {
-    argName := ""
-    for i := 1; i < len(os.Args); i++ {
-        if argName == "-port" {
-            portVal, portErr := strconv.ParseInt(os.Args[i], 10, 64)
-            if portErr == nil {
-                if portVal > 1 {
-                    serverPort = os.Args[i]
-                }
-            }
-        }
-        if argName == "-sleep" {
-            sleepVal, sleepErr := strconv.ParseInt(os.Args[i], 10, 64)
-            if sleepErr == nil {
-                if sleepVal > 0 {
-                    sleepSeconds = time.Duration(sleepVal)
-                }
-            }
-        }
-        argName = os.Args[i]
-    }
-}
-
-
 func main() {
-    processArgs()
+    flag.Parse()
 
     http.HandleFunc("/hash", hashHandler)
     http.HandleFunc("/hash/", hashGET)
     http.HandleFunc("/stats", statsHandler)
-    http.ListenAndServe(":" + serverPort, nil)
+    http.ListenAndServe(fmt.Sprintf(":%d", serverPort), nil)
 }
