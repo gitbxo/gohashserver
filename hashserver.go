@@ -2,12 +2,15 @@ package main
 
 import (
     "crypto/sha512"
+    "context"
     "encoding/base64"
     "flag"
     "fmt"
+    "log"
     "net/http"
     "strconv"
     "strings"
+    "sync"
     "sync/atomic"
     "time"
 )
@@ -32,14 +35,16 @@ var (
     hashMap             = make(map[string]string)
 
     serverPort          = flag.Int("port", 8080, "http port to listen on")
-    hashDelaySeconds    = flag.Duration("hash-delay", 5,
-            "Delay for hash computation (5s,5m,5h)")
-    shutdownDelay       = flag.Duration("shutdown-delay", 10 * time.Second,
-            "Delay before shutdown to allow work to complete")
+    httpWait            = &sync.WaitGroup{}
+    hashDelay           = flag.Duration("hash-delay", 5 * time.Second,
+            "Delay for hash computation (default 5s)")
 )
 
 
 func hashGET(w http.ResponseWriter, req *http.Request) {
+    httpWait.Add(1)
+    defer httpWait.Done()
+
     key := strings.TrimPrefix(req.URL.Path, "/hash/")
     val, ok := hashMap[key]
     if ok {
@@ -51,10 +56,15 @@ func hashGET(w http.ResponseWriter, req *http.Request) {
 
 
 func hashPOST(w http.ResponseWriter, start time.Time, password string) {
+    httpWait.Add(1)
+    defer httpWait.Done()
+
     newId := hashCounter.Add(1)
     // Delay saving the hash value
+    // This creates a background thread to sleep, then save the hash value
     defer func() { go saveHashValue(newId, password) }()
-    fmt.Fprintf(w, "%d\n", newId)
+    fmt.Fprintf(w, "newId %d\n", newId)
+    fmt.Fprintf(w, "hashC %d\n", hashCounter.c)
 
     elapsed := time.Since(start)
     // Add the elapsed time in microseconds
@@ -63,8 +73,11 @@ func hashPOST(w http.ResponseWriter, start time.Time, password string) {
 
 
 func saveHashValue(key int64, value string) {
+    httpWait.Add(1)
+    defer httpWait.Done()
+
     // sleep 5 seconds
-    time.Sleep( hashDelaySeconds * time.Second )
+    time.Sleep( *hashDelay )
     sha_512 := sha512.New()
     sha_512.Write([]byte(value))
     hashVal := base64.StdEncoding.EncodeToString(sha_512.Sum(nil))
@@ -75,6 +88,9 @@ func saveHashValue(key int64, value string) {
 // For example: curl http://localhost:8080/stats should return:
 // {"total": 1, "average": 123}
 func statsHandler(w http.ResponseWriter, req *http.Request) {
+    httpWait.Add(1)
+    defer httpWait.Done()
+
     requests := hashCounter.c
     // calculate average time in microseconds
     if requests > 0 {
@@ -95,6 +111,9 @@ func statsHandler(w http.ResponseWriter, req *http.Request) {
 // If the method is not POST, it returns 404 (Http Not Found)
 //
 func hashHandler(w http.ResponseWriter, req *http.Request) {
+    httpWait.Add(1)
+    defer httpWait.Done()
+
     start := time.Now()
 
     if req.Method == "POST" {
@@ -111,8 +130,35 @@ func hashHandler(w http.ResponseWriter, req *http.Request) {
 func main() {
     flag.Parse()
 
-    http.HandleFunc("/hash", hashHandler)
-    http.HandleFunc("/hash/", hashGET)
-    http.HandleFunc("/stats", statsHandler)
-    http.ListenAndServe(fmt.Sprintf(":%d", serverPort), nil)
+    log.Printf(fmt.Sprintf("main: starting HTTP server at port %d", *serverPort))
+
+    httpShutdown := &sync.WaitGroup{}
+    httpShutdown.Add(1)
+
+    httpMux := http.NewServeMux()
+    server := &http.Server{ Addr: fmt.Sprintf(":%d", *serverPort), Handler: httpMux }
+
+    httpMux.HandleFunc("/hash", hashHandler)
+    httpMux.HandleFunc("/hash/", hashGET)
+    httpMux.HandleFunc("/stats", statsHandler)
+    httpMux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
+        defer httpShutdown.Done()
+        server.Shutdown(context.Background())
+    })
+
+    if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+        log.Fatal(err)
+    }
+
+    log.Printf("main: serving http requests")
+
+    // wait for shutdown request
+    httpShutdown.Wait()
+    log.Printf("main: stopping HTTP server")
+
+    // wait for shutdown request
+    httpWait.Wait()
+
+    log.Printf("main: completed HTTP requests")
+
 }
