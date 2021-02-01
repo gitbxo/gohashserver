@@ -60,15 +60,15 @@ func hashPOST(w http.ResponseWriter, start time.Time, password string) {
     defer httpWait.Done()
 
     newId := hashCounter.Add(1)
-    // Delay saving the hash value
+    // Delay saving the hash value until after request returns
     // This creates a background thread to sleep, then save the hash value
     defer func() { go saveHashValue(newId, password) }()
-    fmt.Fprintf(w, "newId %d\n", newId)
-    fmt.Fprintf(w, "hashC %d\n", hashCounter.c)
+    fmt.Fprintf(w, "%d\n", newId)
 
     elapsed := time.Since(start)
     // Add the elapsed time in microseconds
     hashTime.Add(elapsed.Microseconds())
+    log.Printf(fmt.Sprintf("hashPost: elapsed %d", elapsed.Microseconds()))
 }
 
 
@@ -82,6 +82,7 @@ func saveHashValue(key int64, value string) {
     sha_512.Write([]byte(value))
     hashVal := base64.StdEncoding.EncodeToString(sha_512.Sum(nil))
     hashMap[strconv.FormatInt(key, 10)] = hashVal
+    log.Printf(fmt.Sprintf("saveHashValue: saved %d", key))
 }
 
 
@@ -127,6 +128,13 @@ func hashHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 
+func httpStart(server *http.Server) {
+    if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+        log.Fatal(err)
+    }
+}
+
+
 func main() {
     flag.Parse()
 
@@ -142,13 +150,12 @@ func main() {
     httpMux.HandleFunc("/hash/", hashGET)
     httpMux.HandleFunc("/stats", statsHandler)
     httpMux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
-        defer httpShutdown.Done()
-        server.Shutdown(context.Background())
+        fmt.Fprintf(w, "Shutting down HTTP server\n")
+        go server.Shutdown(context.Background())
+        httpShutdown.Done()
     })
 
-    if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-        log.Fatal(err)
-    }
+    go httpStart(server)
 
     log.Printf("main: serving http requests")
 
