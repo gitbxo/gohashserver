@@ -16,6 +16,7 @@ Go lang server for serving hash values
     GET /stats returns number of POST /hash requests and average time in microseconds
     GET /shutdown tells server to shutdown
         Note: Shutdown waits for requests to finish processing
+        Note: Interrupt signals also have the same effect as call to /shutdown
 
 ## Design
 ### Graceful Shutdown
@@ -28,6 +29,10 @@ Go lang server for serving hash values
     To start the computation after the request completes, defer is used
     By using defer (to delay starting the computation) and go (separate thread)
     we are able to complete the http request and compute the hash in the background
+
+### Statistics
+    The variables for the counter and timer stats are atomic
+    This ensures that they are fetched and incremented atomically
 
 
 ## Sample requests

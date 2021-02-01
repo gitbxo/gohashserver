@@ -8,10 +8,13 @@ import (
     "fmt"
     "log"
     "net/http"
+    "os"
+    "os/signal"
     "strconv"
     "strings"
     "sync"
     "sync/atomic"
+    "syscall"
     "time"
 )
 
@@ -35,6 +38,7 @@ var (
     hashMap             = make(map[string]string)
 
     serverPort          = flag.Int("port", 8080, "http port to listen on")
+    httpShutdown        = &sync.WaitGroup{}
     httpWait            = &sync.WaitGroup{}
     hashDelay           = flag.Duration("hash-delay", 5 * time.Second,
             "Delay for hash computation (default 5s)")
@@ -52,7 +56,8 @@ func hashGET(w http.ResponseWriter, req *http.Request) {
     if ok {
         fmt.Fprintf(w, "%s\n", val)
     } else {
-        fmt.Fprintf(w, "Missing index %s\n", key)
+        log.Printf(fmt.Sprintf("hashGET: missing index %s", key))
+        http.NotFound(w, req)
     }
 }
 
@@ -138,8 +143,10 @@ func httpStart(server *http.Server) {
 
 
 func httpStop(server *http.Server) {
-    timeoutContext, cancel := context.WithTimeout(context.Background(), *shutdownTimeout)
-    defer cancel()
+    defer httpShutdown.Done()
+
+    timeoutContext, cancelStop := context.WithTimeout(context.Background(), *shutdownTimeout)
+    defer cancelStop()
 
     if err := server.Shutdown(timeoutContext); err != nil {
         log.Fatal(err)
@@ -147,12 +154,29 @@ func httpStop(server *http.Server) {
 }
 
 
+func httpInterrupt(server *http.Server) {
+    signalChan := make(chan os.Signal, 1)
+    signal.Notify(
+        signalChan,
+        syscall.SIGHUP,  // kill -SIGHUP XXXX
+        syscall.SIGINT,  // kill -SIGINT XXXX or Ctrl+c
+        syscall.SIGQUIT, // kill -SIGQUIT XXXX
+    )
+
+    <-signalChan
+    log.Print("os.Interrupt - shutting down...\n")
+    go httpStop(server)
+
+    go func() {
+        <-signalChan
+        log.Fatal("os.Kill - terminating...\n")
+    }()
+}
+
 func main() {
     flag.Parse()
 
     log.Printf(fmt.Sprintf("main: starting HTTP server at port %d", *serverPort))
-
-    httpShutdown := &sync.WaitGroup{}
     httpShutdown.Add(1)
 
     httpMux := http.NewServeMux()
@@ -164,12 +188,14 @@ func main() {
     httpMux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
         fmt.Fprintf(w, "Shutting down HTTP server\n")
         go httpStop(server)
-        httpShutdown.Done()
     })
 
     go httpStart(server)
 
     log.Printf("main: serving http requests")
+
+    // handle interrupt signals
+    go httpInterrupt(server)
 
     // wait for shutdown request
     httpShutdown.Wait()
