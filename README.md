@@ -2,8 +2,9 @@
 Go lang server for serving hash values
 
 ## Parameters
-    port           # http port, defaults to 8080
-    hash-delay     # delay for saving hash value, defaults to 5 seconds
+    port              # http port, defaults to 8080
+    hash-delay        # delay for saving hash value, defaults to 5 seconds
+    shutdown-timeout  # timeout for shutdown, defaults to 1 minute
 
 ## Example command
     go run hashserver.go --port 9000

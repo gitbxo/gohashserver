@@ -1,8 +1,8 @@
 package main
 
 import (
-    "crypto/sha512"
     "context"
+    "crypto/sha512"
     "encoding/base64"
     "flag"
     "fmt"
@@ -38,6 +38,8 @@ var (
     httpWait            = &sync.WaitGroup{}
     hashDelay           = flag.Duration("hash-delay", 5 * time.Second,
             "Delay for hash computation (default 5s)")
+    shutdownTimeout     = flag.Duration("shutdown-timeout", 1 * time.Minute,
+            "Timeout for shutdown (default 1m)")
 )
 
 
@@ -135,6 +137,16 @@ func httpStart(server *http.Server) {
 }
 
 
+func httpStop(server *http.Server) {
+    timeoutContext, cancel := context.WithTimeout(context.Background(), *shutdownTimeout)
+    defer cancel()
+
+    if err := server.Shutdown(timeoutContext); err != nil {
+        log.Fatal(err)
+    }
+}
+
+
 func main() {
     flag.Parse()
 
@@ -151,7 +163,7 @@ func main() {
     httpMux.HandleFunc("/stats", statsHandler)
     httpMux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
         fmt.Fprintf(w, "Shutting down HTTP server\n")
-        go server.Shutdown(context.Background())
+        go httpStop(server)
         httpShutdown.Done()
     })
 
