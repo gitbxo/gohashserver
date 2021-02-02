@@ -30,6 +30,7 @@ Go lang server for serving hash values
     By using defer (to delay starting the computation) and go (separate thread)
     we are able to complete the http request and compute the hash in the background
 
+
 ### Statistics
     The variables for the counter and timer stats are atomic
     This ensures that they are fetched and incremented atomically
@@ -48,4 +49,9 @@ Go lang server for serving hash values
     ==> fwaxl5tGU2y3NgCH3fbT0uv/jTre6aZh4KQBGoA8cnJe89jGZQO0kiSNqJl6aho+ozFzkPmgz4gM2zx/Iy9MGg==
     curl -X GET http://localhost:9000/shutdown
     ==> Shutting down HTTP server
+
+
+## Testing
+    go test hashserver.go hashserver_test.go
+
 
