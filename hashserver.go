@@ -83,7 +83,7 @@ func saveHashValue(key int64, value string) {
     httpWait.Add(1)
     defer httpWait.Done()
 
-    // sleep 5 seconds
+    // sleep for hashDelay
     time.Sleep( *hashDelay )
     sha_512 := sha512.New()
     sha_512.Write([]byte(value))
@@ -201,9 +201,23 @@ func main() {
     httpShutdown.Wait()
     log.Printf("main: stopping HTTP server")
 
-    // wait for shutdown request
-    httpWait.Wait()
+    // complete http requests or timeout
+    httpTimeout := &sync.WaitGroup{}
+    httpTimeout.Add(1)
+    go func() {
+        // stop if all processing is complete
+        defer httpTimeout.Done()
 
-    log.Printf("main: completed HTTP requests")
+        httpWait.Wait()
+        log.Printf("main: completed HTTP requests")
+    }()
+    go func() {
+        // stop after shutdownTimeout
+        defer httpTimeout.Done()
 
+        // sleep for shutdownTimeout
+        time.Sleep( *shutdownTimeout )
+        log.Printf("main: shutdown timeout exceeded")
+    }()
+    httpTimeout.Wait()
 }
